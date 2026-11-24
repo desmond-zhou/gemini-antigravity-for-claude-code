@@ -105,13 +105,109 @@ def _abs(paths: list[str] | None) -> list[str]:
     return out
 
 
+import re as _re
+_QUOTA_RE = _re.compile(r"(?:status|code|HTTP)[^\n]{0,12}\b429\b|quota exceeded|quota exhausted", _re.I)
+_models_cache: tuple[float, set] = (0.0, set())
+_COOLDOWN = HOME / "quota_cooldown_until"
+
+
+async def _check_model(slug: str) -> str | None:
+    """agy silently falls back to its default model on an unknown --model; refuse instead."""
+    global _models_cache
+    if time.time() - _models_cache[0] > 3600:
+        p = await asyncio.create_subprocess_exec(AGY, "models", stdout=asyncio.subprocess.PIPE,
+                                                 stderr=asyncio.subprocess.DEVNULL,
+                                                 stdin=asyncio.subprocess.DEVNULL)
+        try:
+            so = (await asyncio.wait_for(p.communicate(), 60))[0].decode()
+        except asyncio.TimeoutError:
+            p.kill(); so = ""
+        names = {ln.split("\t")[0].strip() for ln in so.splitlines() if "\t" in ln}
+        if names:
+            _models_cache = (time.time(), names)
+    names = _models_cache[1]
+    if names and slug not in names:
+        return (f"unknown model {slug!r}. Aliases: {', '.join(MODELS)}; or one of: "
+                + ", ".join(sorted(n for n in names if n.startswith("gemini"))))
+    return None
+
+
+def _cooldown_left() -> int:
+    try:
+        return max(0, int(float(_COOLDOWN.read_text()) - time.time()))
+    except (OSError, ValueError):
+        return 0
+
+
+def _parse_reset(text: str) -> int:
+    """'Resets in 4h24m' / '37m' / '50s' → seconds (default 30 min if not stated)."""
+    import re
+    m = re.search(r"[Rr]esets? in\s+((?:\d+\s*[hms]\s*)+)", text)
+    if not m:
+        return 1800
+    return sum(int(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, u in re.findall(r"(\d+)\s*([hms])", m.group(1)))
+
+
+async def _exec(cmd, ws: Path, deny, dirs, json_schema, timeout):
+    """Run one agy turn; watch its log so quota exhaustion / signed-out aborts in seconds
+    instead of agy silently retrying until the print timeout."""
+    log = ws / "agy.log"
+    cmd = cmd + ["--output-format", "json", "--disable-slash-commands", "--log-file", str(log),
+                 # no pre-approved allow rules leak in from the user's agy settings
+                 "--settings", json.dumps({"permissions": {"allow": [], "deny": deny}}),
+                 "--print-timeout", f"{timeout}s"]
+    for d in dirs:
+        cmd += ["--add-dir", d]
+    if json_schema:
+        cmd += ["--json-schema", json.dumps(json_schema)]
+    t0 = time.time()
+    early = ""
+    async with _sem:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=ws, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+        comm = asyncio.ensure_future(proc.communicate())
+        while not comm.done():
+            await asyncio.wait({comm}, timeout=2)
+            if comm.done():
+                break
+            try:
+                tail = log.read_text(errors="ignore")[-20000:]
+            except OSError:
+                tail = ""
+            if "RESOURCE_EXHAUSTED" in tail or "Too Many Requests" in tail or _QUOTA_RE.search(tail):
+                secs = _parse_reset(tail)
+                _COOLDOWN.write_text(str(time.time() + secs))
+                early = f"Gemini quota exhausted (429); resets in ~{secs // 60} min"
+            elif "Authentication required" in tail or "authentication required" in tail:
+                early = "authentication required"
+            elif time.time() - t0 > timeout + 60:
+                early = f"timed out after {timeout}s"
+            if early:
+                try:
+                    os.killpg(proc.pid, 9)
+                except ProcessLookupError:
+                    pass
+                break
+        try:
+            so, se = await asyncio.wait_for(comm, 10)
+        except (asyncio.TimeoutError, Exception):
+            so, se = b"", b""
+    shutil.rmtree(ws, ignore_errors=True)
+    try:
+        d = json.loads(so.decode() or "{}")
+    except json.JSONDecodeError:
+        d = {"status": "ERROR", "error": (so.decode() + se.decode())[-800:]}
+    return d, se.decode(errors="ignore"), round(time.time() - t0, 1), early
+
+
 async def run_agy(prompt: str, *, model: str = "fast", files: list[str] | None = None,
                   dirs: list[str] | None = None, web: bool = False, image: bool = False,
                   json_schema: dict | None = None, timeout: int = 600, use_cache: bool = True,
-                  tool: str = "ask") -> dict:
+                  tool: str = "ask", conversation: str | None = None) -> dict:
     files, dirs = _abs(files), _abs(dirs)
     slug = _model(model)
-    cacheable = use_cache and not web and not image
+    cacheable = use_cache and not web and not image and not conversation
     key = hashlib.sha256(json.dumps(
         [tool, slug, prompt, _fingerprint(files), _fingerprint(dirs), json_schema],
         sort_keys=True).encode()).hexdigest()
@@ -122,6 +218,12 @@ async def run_agy(prompt: str, *, model: str = "fast", files: list[str] | None =
             out = json.loads(row[1]); out["cached"] = True
             _log({"ts": time.time(), "tool": tool, "model": slug, "cached": True})
             return out
+
+    if (bad := await _check_model(slug)):
+        return {"error": bad, "model": slug}
+    if (cd := _cooldown_left()):
+        return {"error": f"Gemini quota exhausted; resets in ~{cd // 60} min "
+                         f"(Google AI Pro 5-hour window). Do the task yourself or wait.", "model": slug}
 
     ws = Path(tempfile.mkdtemp(prefix="ws-", dir=HOME))
     names = []
@@ -137,34 +239,15 @@ async def run_agy(prompt: str, *, model: str = "fast", files: list[str] | None =
         full += "Directories for this request (read-only): " + ", ".join(dirs) + "\n"
     full += "\nRequest:\n" + prompt
 
-    cmd = [AGY, "-p", full, "--model", slug, "--output-format", "json", "--disable-slash-commands",
-           "--settings", json.dumps({"permissions": {"deny": deny}}),
-           "--print-timeout", f"{timeout}s"]
-    for d in dirs:
-        cmd += ["--add-dir", d]
-    if json_schema:
-        cmd += ["--json-schema", json.dumps(json_schema)]
-
-    t0 = time.time()
-    async with _sem:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=ws, stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            so, se = await asyncio.wait_for(proc.communicate(), timeout + 60)
-        except asyncio.TimeoutError:
-            proc.kill()
-            shutil.rmtree(ws, ignore_errors=True)
-            return {"error": f"timed out after {timeout}s", "model": slug}
-    shutil.rmtree(ws, ignore_errors=True)
-    secs = round(time.time() - t0, 1)
-    try:
-        d = json.loads(so.decode() or "{}")
-    except json.JSONDecodeError:
-        d = {"status": "ERROR", "error": (so.decode() + se.decode())[-800:]}
-    err = d.get("error") or ("" if d.get("status") == "SUCCESS" else se.decode()[-500:])
+    cmd = [AGY, "-p", full, "--model", slug]
+    if conversation:
+        cmd += ["--conversation", conversation]
+    d, se, secs, early = await _exec(cmd, ws, deny, dirs, json_schema, timeout)
+    err = d.get("error") or early or ("" if d.get("status") == "SUCCESS" else se[-500:])
+    if not err and not (d.get("response") or "").strip() and tool != "generate_image":
+        err = "Gemini returned an empty answer (agy does this when it silently gives up, e.g. on quota)"
     if err and "authentication" in str(err).lower():
-        err += " — agy is signed out on this Mac; ask the user to re-run the agy Google login."
+        err += " — agy is signed out on this Mac; ask the user to re-run the agy Google login (README)."
     u = d.get("usage") or {}
     out = {"answer": (d.get("response") or "").strip(), "model": slug, "seconds": secs,
            "tokens": {"in": u.get("input_tokens"), "out": u.get("output_tokens"),
@@ -297,6 +380,16 @@ async def gemini_generate_image(prompt: str, out_path: str | None = None, model:
     out.pop("answer", None)
     out["path"] = str(dst)
     return out
+
+
+@mcp.tool()
+async def gemini_followup(conversation_id: str, prompt: str, model: str = "fast",
+                          max_chars: int = 8000) -> dict:
+    """Continue an earlier Gemini conversation (conversation_id from a previous result) without
+    resending the material: e.g. ask a follow-up about the second-opinion findings or the file it
+    already read. Files from the first call are no longer attached; quote what you need."""
+    return _trim(await run_agy(prompt, model=model, conversation=conversation_id,
+                               tool="followup"), max_chars)
 
 
 @mcp.tool()
