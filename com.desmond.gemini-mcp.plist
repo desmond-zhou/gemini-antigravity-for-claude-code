@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.desmond.gemini-mcp</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/desmondzhou/Claude Code/Mini-Server/gemini-mcp/.venv/bin/python</string>
+    <string>/Users/desmondzhou/Claude Code/Mini-Server/gemini-mcp/gemini_mcp.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/desmondzhou/Claude Code/Mini-Server/gemini-mcp</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/Users/desmondzhou/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>Nice</key><integer>5</integer>
+  <key>StandardOutPath</key><string>/Users/desmondzhou/Library/Logs/gemini-mcp.log</string>
+  <key>StandardErrorPath</key><string>/Users/desmondzhou/Library/Logs/gemini-mcp.log</string>
+</dict>
+</plist>
