@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Gemini for Claude: an MCP server that delegates work to Google Gemini through the
-Antigravity CLI (`agy`, the successor of Gemini CLI), using the Google AI Pro subscription.
+"""gemini-antigravity-for-claude-code — an MCP server that lets Claude Code delegate work to
+Google Gemini through the Antigravity CLI (`agy`, the successor of Gemini CLI), using a Google
+AI Pro / Ultra subscription instead of a pay-per-token API key.
 
-ONE shared process for every Claude session on this Mac (launchd, streamable HTTP on
+Author: Desmond Zhou — https://desmondzhou.com  ·  MIT License
+Unofficial; not affiliated with Google or Anthropic.
+
+ONE shared process for every Claude session on the machine (launchd, streamable HTTP on
 127.0.0.1:8772/mcp). Design:
   * read-only: each call runs in an empty scratch workspace; the files you name are symlinked
     in; every write/command/browser/MCP tool is denied via agy permission rules
@@ -271,11 +275,15 @@ def _trim(out: dict, max_chars: int) -> dict:
 
 
 # ------------------------------------------------------------------ MCP
+ASK_FIRST = os.environ.get("GEMINI_MCP_ASK_FIRST", "1") != "0"
+
 mcp = FastMCP("gemini", instructions=(
     "Google Gemini via the user's Google AI Pro subscription (no per-token cost, but a 5-hour and "
-    "weekly quota). The user is building the habit gradually: before calling any of these tools, "
-    "ask the user whether to hand the subtask to Gemini (say what, why, rough time) unless they "
-    "already asked for Gemini in this conversation. Good fits — what Gemini does better or cheaper than you: reading very large "
+    "weekly quota). "
+    + ("Before calling any of these tools, ask the user whether to hand the subtask to Gemini "
+       "(say what, why, rough time) unless they already asked for Gemini in this conversation. "
+       if ASK_FIRST else "")
+    + "Good fits — what Gemini does better or cheaper than you: reading very large "
     "files/logs/codebases and returning only conclusions; images, PDFs, audio and video "
     "(gemini_media); fresh web facts with sources (gemini_research); image generation "
     "(gemini_generate_image); and an independent second opinion on important plans, code or "
