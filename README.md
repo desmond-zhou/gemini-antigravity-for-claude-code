@@ -4,7 +4,7 @@ Let **Claude Code** hand work to **Google Gemini** using your **Google AI Pro / 
 with no pay-per-token API key. It's an MCP server that wraps Google's
 **Antigravity CLI (`agy`)**, the successor to Gemini CLI.
 
-[中文说明](README.zh-CN.md) · Built by **[Desmond Zhou](https://desmondzhou.com)**
+Built by **[Desmond Zhou](https://desmondzhou.com)**
 
 > Why Antigravity? As of 2026-06-18, Gemini CLI no longer serves free, Google One, or Google AI
 > Pro/Ultra users ([Gemini CLI README](https://github.com/google-gemini/gemini-cli)). Those
