@@ -190,7 +190,9 @@ def _trim(out: dict, max_chars: int) -> dict:
 # ------------------------------------------------------------------ MCP
 mcp = FastMCP("gemini", instructions=(
     "Google Gemini via the user's Google AI Pro subscription (no per-token cost, but a 5-hour and "
-    "weekly quota). Delegate here what Gemini does better or cheaper than you: reading very large "
+    "weekly quota). The user is building the habit gradually: before calling any of these tools, "
+    "ask the user whether to hand the subtask to Gemini (say what, why, rough time) unless they "
+    "already asked for Gemini in this conversation. Good fits — what Gemini does better or cheaper than you: reading very large "
     "files/logs/codebases and returning only conclusions; images, PDFs, audio and video "
     "(gemini_media); fresh web facts with sources (gemini_research); image generation "
     "(gemini_generate_image); and an independent second opinion on important plans, code or "
