@@ -359,14 +359,21 @@ async def gemini_second_opinion(subject: str, context: str = "", files: list[str
 
 
 @mcp.tool()
-async def gemini_generate_image(prompt: str, out_path: str | None = None, model: str = "fast") -> dict:
+async def gemini_generate_image(prompt: str, out_path: str | None = None, model: str = "fast",
+                                reference_images: list[str] | None = None) -> dict:
     """Generate an image with Gemini's image model (Nano Banana) from a text description.
+    reference_images: optional absolute paths of images to use as reference (people's likeness,
+    style, a picture to edit); say in the prompt how to use them.
     Saves it to out_path (absolute, .jpg/.png) or to the server's out/ folder; returns the path.
     Takes ~30 s. Not cached."""
     before = time.time()
-    out = await run_agy("Use your generate_image tool to create this image, then reply only with "
-                        "'done':\n" + prompt, model=model, image=True, tool="generate_image",
-                        timeout=300)
+    ref = ""
+    if reference_images:
+        ref = ("Pass the reference image files in your workspace to your generate_image tool as "
+               "input images and use them as instructed below.\n")
+    out = await run_agy(ref + "Use your generate_image tool to create this image, then reply only "
+                        "with 'done':\n" + prompt, model=model, image=True, tool="generate_image",
+                        files=reference_images, timeout=300)
     cands = []
     cid = out.get("conversation_id")
     pats = [str(BRAIN / cid / "**" / "*")] if cid else []

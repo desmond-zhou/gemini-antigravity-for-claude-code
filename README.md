@@ -18,7 +18,7 @@ Built by **[Desmond Zhou](https://desmondzhou.com)**
 | `gemini_media` | Understanding images, PDFs, audio, and video (picture and soundtrack). | fast |
 | `gemini_research` | Fresh facts through Google Search, with source URLs. | balanced |
 | `gemini_second_opinion` | An independent review of a plan, diff, or conclusion by a different model family. Returns structured JSON with `verdict`, `issues[{severity, issue, evidence, suggestion}]`, `missed_alternatives`, and `confidence`. | strong |
-| `gemini_generate_image` | Text-to-image (Nano Banana). Saves to a path you choose. | fast |
+| `gemini_generate_image` | Text-to-image (Nano Banana), optionally from reference images (`reference_images`: keep people's likeness or a style, or edit a picture). Saves to a path you choose. | fast |
 | `gemini_followup` | Continuing a previous Gemini conversation without resending the material. | fast |
 | `gemini_job_start` / `gemini_job_result` | Long tasks in the background. | balanced |
 | `gemini_status` | The agy version, model aliases, and local call counts. | — |
